@@ -8,7 +8,7 @@ import imageio
 
 parser = argparse.ArgumentParser('script to generate training data')
 parser.add_argument('--image', type=str,
-                    default='D:/peoject/ffn/third_party/neuroproof_examples/training_sample2/grayscale_maps',
+                    default='D:/project/ffn/third_party/neuroproof_examples/training_sample2/grayscale_maps',
                     help='directory of images')
 parser.add_argument('--label', type=str, default='./data/ffn/groundtruth.h5')
 parser.add_argument('--save', type=str, default='data.h5', help='save file name')
@@ -135,7 +135,7 @@ def run():
     coor = []
     for coord_idx in indices:
         z, y, x = np.unravel_index(coord_idx, vol_shapes)
-        coor.append([x+m[0], y+m[1], z+m[2]])
+        coor.append([z+m[2], y+m[1], x+m[0]])
 
     with h5py.File(args.save, 'w') as f:
         f.create_dataset('image', data=images, compression='gzip')
