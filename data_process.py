@@ -1,20 +1,17 @@
-import glob
-import os
 import argparse
 from collections import defaultdict
 import h5py
 import numpy as np
-import imageio
+from libtiff import TIFFfile
+import cv2
 
 parser = argparse.ArgumentParser('script to generate training data')
-parser.add_argument('--image', type=str,
-                    default='D:/project/ffn/third_party/neuroproof_examples/training_sample2/grayscale_maps',
-                    help='directory of images')
-parser.add_argument('--label', type=str, default='./data/ffn/groundtruth.h5')
-parser.add_argument('--save', type=str, default='data.h5', help='save file name')
-parser.add_argument('--shape', type=list, default=[49, 49, 49], help='seed shape')
+parser.add_argument('--image', type=str, default='./data/ffn/images/raw_data_4_channel.tif', help='directory of images')
+parser.add_argument('--label', type=str, default='./data/ffn/labels/target_data.tif', help='directory of labels')
+parser.add_argument('--save', type=str, default='data1.h5', help='save file name')
+parser.add_argument('--shape', type=list, default=[40, 40, 40], help='seed shape')
 parser.add_argument('--thr', type=list, default=[0.025, 0.05, 0.075, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
-parser.add_argument('--min_size', type=int, default=10000)
+parser.add_argument('--min_size', type=int, default=5000)
 
 args = parser.parse_args()
 
@@ -87,37 +84,39 @@ def compute_partitions(seg_array, thresholds, lom_radius, min_size=10000):
         if l == 0:
             continue
 
-    object_mask = (seg_array == l)
+        object_mask = (seg_array == l)
 
-    svt = _summed_volume_table(object_mask)
-    active_fraction = _query_summed_volume(svt, lom_diam_zyx) / fov_volume
-    assert active_fraction.shape == output.shape
+        svt = _summed_volume_table(object_mask)
+        active_fraction = _query_summed_volume(svt, lom_diam_zyx) / fov_volume
+        assert active_fraction.shape == output.shape
 
-    # Drop context that is only necessary for computing the active fraction
-    # (i.e. one LOM radius in every direction).
-    object_mask = object_mask[valid_sel]
+        # Drop context that is only necessary for computing the active fraction
+        # (i.e. one LOM radius in every direction).s
+        object_mask = object_mask[valid_sel]
 
-    # TODO(mjanusz): Use np.digitize here.
-    for i, th in enumerate(thresholds):
-        output[object_mask & (active_fraction < th) & (output == 0)] = i + 1
+        # TODO(mjanusz): Use np.digitize here.
+        for i, th in enumerate(thresholds):
+            output[object_mask & (active_fraction < th) & (output == 0)] = i + 1
 
-    output[object_mask & (active_fraction >= thresholds[-1]) & (output == 0)] = len(thresholds) + 1
+        output[object_mask & (active_fraction >= thresholds[-1]) & (output == 0)] = len(thresholds) + 1
 
     return corner, output
 
 
 def run():
-    png_files = glob.glob(os.path.join(args.image, '*.png'))
-    png_files.sort()
-    images = [imageio.imread(i) for i in png_files]
-    images = np.array(images)
-    with h5py.File(args.label, 'r') as f:
-        label = f['stack'].value
+    images = TIFFfile(args.image)
+    labels = TIFFfile(args.label)
+    samples, _ = images.get_samples()
+    images = np.array(samples).transpose([1, 2, 3, 0])
+    images = np.array([cv2.cvtColor(im, cv2.COLOR_BGR2GRAY) for im in images])
+    samples, _ = labels.get_samples()
+    labels = np.array(samples).transpose([1, 2, 3, 0])
+    labels = np.array([cv2.cvtColor(label, cv2.COLOR_BGR2GRAY) for label in labels])
 
     m = np.array([int(x/2) for x in args.shape])
-    seg = label.copy()
+    seg = labels.copy()
     corner, partitions = compute_partitions(seg[...], [float(x) for x in args.thr], m, args.min_size)
-
+    print(corner)
     totals = defaultdict(int)  # partition -> voxel count
     indices = defaultdict(list)  # partition -> [(vol_id, 1d index)]
     vol_shapes = partitions.shape
@@ -139,7 +138,7 @@ def run():
 
     with h5py.File(args.save, 'w') as f:
         f.create_dataset('image', data=images, compression='gzip')
-        f.create_dataset('label', data=label, compression='gzip')
+        f.create_dataset('label', data=labels, compression='gzip')
         f.create_dataset('coor', data=coor, compression='gzip')
 
 
